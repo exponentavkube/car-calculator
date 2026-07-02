@@ -418,12 +418,19 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
 
   const mu_x_VF = Fz_VF > 0 ? Fx_max_VF / Fz_VF : 0;
   const mu_x_VN = Fz_VN > 0 ? Fx_max_VN / Fz_VN : 0;
+
+  const Fx_max_straight = muMax * Fz_straight;
   
   // --- ИСПРАВЛЕНИЕ 4: возврат к негоночной модели сцепления с дорогой в повороте
-  const s_crit_VF = Math.max(2, CAR.s_opt * (mu_x_VF / muMax));
-  const s_crit_VN = Math.max(2, CAR.s_opt * (mu_x_VN / muMax));
+  // const s_crit_VF = Math.max(2, CAR.s_opt * (mu_x_VF / muMax));
+  // const s_crit_VN = Math.max(2, CAR.s_opt * (mu_x_VN / muMax));
   
-  const Fx_max_straight = muMax * Fz_straight;
+  // ИСПРАВЛЕНИЕ 7: добавлена защита деления на 0
+  const s_crit_VF = Math.max(2, CAR.s_opt * (Fx_max_VF / Math.max(1, Fx_max_straight)));
+  const s_crit_VN = Math.max(2, CAR.s_opt * (Fx_max_VN / Math.max(1, Fx_max_straight)));
+ 
+  // const Fx_max_straight = muMax * Fz_straight;
+  
   const Fx_front_required = CAR.m * deceleration * CAR.brakeDistFront;
   const Fx_req_per_wheel = Fx_front_required / 2;
 

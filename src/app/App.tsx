@@ -391,14 +391,14 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const Fy_front_max_possible = muMax * Fz_front_total;
   const Fy_front_actual = Math.min(Fy_front_total_req, Fy_front_max_possible);
   
-  // --- ИСПРАВЛЕНИЕ 3: Нелинейная чувствительность к нагрузке (Load Sensitivity) ---
-  // С ростом нагрузки удельное сцепление падает
+  // --- ИСПРАВЛЕНИЕ 3, 6: Нелинейная чувствительность к нагрузке (Load Sensitivity) ---
+  // С ростом нагрузки удельное сцепление падает, добавлено ограничение сверху - не выше базового сцепления
   const getMuDynamic = (Fz: number, Fz_ref: number, mu_base: number) => {
-    if (Fz <= 0) return 0;
-    // Эмпирическая формула: mu = mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref)
-    const k = 0.15; // Коэффициент чувствительности
-    return mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref);
-  };
+  if (Fz <= 0) return 0;
+  const k = 0.15;
+  const mu = mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref);
+  return Math.min(mu_base, mu); // не выше базового
+};
 
   const mu_VF = getMuDynamic(Fz_VF, Fz_static_front, muMax);
   const mu_VN = getMuDynamic(Fz_VN, Fz_static_front, muMax);

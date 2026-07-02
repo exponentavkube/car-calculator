@@ -559,26 +559,30 @@ function CscModule() {
           </div>
         </div>
 
-        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg">
-          <div className="flex justify-between items-center">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Внешнее колесо (VF)</h3>
-            <span className="bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full text-xs font-bold">✅ СТАБИЛЬНО</span>
-          </div>
-          <div className="mt-4 space-y-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Порог скольжения (s_crit):</span>
-              <span className="font-mono font-bold text-emerald-400">{calc.s_crit_VF.toFixed(1)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Скольжение без CSC (s_act):</span>
-              <span className="font-mono font-bold text-slate-300">{calc.s_actual_VF.toFixed(1)}%</span>
-            </div>
-            <div className="border-t border-slate-700/50 pt-2 flex justify-between text-[10px] text-slate-500">
-              <span>Запрос тормозов: {calc.Fx_req_per_wheel.toFixed(0)} Н</span>
-              <span>Предел сцепления: {calc.Fx_max_VF.toFixed(0)} Н</span>
-            </div>
-          </div>
-        </div>
+<div className={`rounded-2xl p-5 border shadow-lg transition-all duration-300 ${calc.isLocked_VF ? "bg-rose-950/80 border-rose-500 text-rose-100" : "bg-slate-800/90 border-slate-700 text-slate-100"}`}>
+  <div className="flex justify-between items-center">
+    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Внешнее колесо (VF)</h3>
+    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${calc.isLocked_VF ? "bg-rose-500 text-white animate-pulse" : "bg-emerald-500/10 text-emerald-400"}`}>
+      {calc.isLocked_VF ? "🚨 БЛОКИРОВКА!" : "✅ СТАБИЛЬНО"}
+    </span>
+  </div>
+  <div className="mt-4 space-y-2 text-xs">
+    <div className="flex justify-between">
+      <span className="text-slate-400">Порог скольжения (s_crit):</span>
+      <span className="font-mono font-bold text-emerald-400">{calc.s_crit_VF.toFixed(1)}%</span>
+    </div>
+    <div className="flex justify-between">
+      <span className="text-slate-400">Скольжение без CSC (s_act):</span>
+      <span className={`font-mono font-bold ${calc.isLocked_VF ? "text-rose-400" : "text-slate-300"}`}>
+        {calc.s_actual_VF.toFixed(1)}% {calc.isLocked_VF && "(Глубокий Срыв)"}
+      </span>
+    </div>
+    <div className="border-t border-slate-700/50 pt-2 flex justify-between text-[10px] text-slate-500">
+      <span>Запрос тормозов: {calc.Fx_req_per_wheel.toFixed(0)} Н</span>
+      <span>Предел сцепления: {calc.Fx_max_VF.toFixed(0)} Н</span>
+    </div>
+  </div>
+</div>
 
         <div className={`rounded-2xl p-5 border shadow-lg transition-all duration-300 ${calc.cscBrakeReductionRequired ? "bg-blue-950/80 border-blue-500 text-blue-100" : "bg-slate-800/90 border-slate-700 text-slate-100"}`}>
           <div className="flex justify-between items-center">

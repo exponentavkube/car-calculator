@@ -314,22 +314,22 @@ function AbsModule() {
                 <th className="py-2 px-4 text-center">Статус ABS</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700/60">
-              {rows.map((row) => (
-                <tr key={row.v} className="hover:bg-slate-700/30 transition-colors">
-                  <td className="py-3 px-5 text-center font-bold text-white bg-slate-900/30 font-mono">{row.v} км/ч</td>
-                  <td className="py-3 px-4 border-l border-slate-700/50 text-center font-mono font-medium text-sky-300">{row.muNew.toFixed(3)}</td>
-                  <td className={`py-3 px-4 text-center font-mono text-sm ${row.absNew ? "text-red-300" : "text-emerald-300"}`}>{row.aNew.toFixed(2)}</td>
-                  <td className="py-3 px-4 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${row.absNew ? "bg-red-950/50 text-red-400 border-red-500/40" : "bg-emerald-950/50 text-emerald-400 border-emerald-500/40"}`}>
-                      {row.absNew ? "ABS АКТИВНА" : "Качение"}
+            <tbody className="divide-y divide-slate-700/50">
+              {rows.map((r) => (
+                <tr key={r.v} className="hover:bg-slate-700/30 transition-colors">
+                  <td className="py-2.5 px-5 text-center font-mono font-bold text-slate-300 bg-slate-900/30">{r.v}</td>
+                  <td className="py-2.5 px-4 text-center border-l border-slate-700 font-mono text-sky-400">{r.muNew.toFixed(3)}</td>
+                  <td className="py-2.5 px-4 text-center font-mono text-slate-400">{r.aNew.toFixed(2)}</td>
+                  <td className="py-2.5 px-4 text-center">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter ${r.absNew ? "bg-red-500/10 text-red-400 border border-red-500/30" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"}`}>
+                      {r.absNew ? "БЛОК (ABS)" : "КАЧЕНИЕ"}
                     </span>
                   </td>
-                  <td className="py-3 px-4 border-l border-slate-700/50 text-center font-mono font-medium text-amber-300">{row.muWorn.toFixed(3)}</td>
-                  <td className={`py-3 px-4 text-center font-mono text-sm ${row.absWorn ? "text-red-300" : "text-emerald-300"}`}>{row.aWorn.toFixed(2)}</td>
-                  <td className="py-3 px-4 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${row.absWorn ? "bg-red-950/50 text-red-400 border-red-500/40" : "bg-emerald-950/50 text-emerald-400 border-emerald-500/40"}`}>
-                      {row.absWorn ? "ABS АКТИВНА" : "Качение"}
+                  <td className="py-2.5 px-4 text-center border-l border-slate-700 font-mono text-amber-500">{r.muWorn.toFixed(3)}</td>
+                  <td className="py-2.5 px-4 text-center font-mono text-slate-400">{r.aWorn.toFixed(2)}</td>
+                  <td className="py-2.5 px-4 text-center">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter ${r.absWorn ? "bg-red-500/10 text-red-400 border border-red-500/30" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"}`}>
+                      {r.absWorn ? "БЛОК (ABS)" : "КАЧЕНИЕ"}
                     </span>
                   </td>
                 </tr>
@@ -367,13 +367,22 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const safeComfortRadius = (v_ms * v_ms) / CAR.ay_comfort;
   const a_y = (v_ms * v_ms) / radius;
   const a_y_g = a_y / CAR.g;
+  
   const Fz_static_front = (CAR.weightDistFront * CAR.m * CAR.g) / 2;
   const deltaFz_long = (CAR.m * deceleration * CAR.h) / (2 * CAR.L);
   const deltaFz_lat = (CAR.weightDistFront * CAR.m * a_y * CAR.h) / CAR.B;
 
+  // --- ИСПРАВЛЕНИЕ 1: Закон сохранения массы при отрыве колеса ---
+  // Максимальная нагрузка на ось ограничена статикой + продольным переносом
+  const Fz_front_physical_max = 2 * (Fz_static_front + deltaFz_long);
+  
   let Fz_VF = Fz_static_front + deltaFz_long + deltaFz_lat;
   let Fz_VN = Fz_static_front + deltaFz_long - deltaFz_lat;
-  if (Fz_VN < 0) Fz_VN = 0;
+  
+  if (Fz_VN < 0) {
+    Fz_VN = 0;
+    Fz_VF = Fz_front_physical_max; // Внешнее колесо несет всю нагрузку оси
+  }
   if (Fz_VF < 0) Fz_VF = 0;
 
   const Fz_front_total = Fz_VF + Fz_VN;
@@ -381,8 +390,22 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const Fy_front_total_req = CAR.weightDistFront * CAR.m * a_y;
   const Fy_front_max_possible = muMax * Fz_front_total;
   const Fy_front_actual = Math.min(Fy_front_total_req, Fy_front_max_possible);
-  const Fmax_VF = muMax * Fz_VF;
-  const Fmax_VN = muMax * Fz_VN;
+  
+  // --- ИСПРАВЛЕНИЕ 3: Нелинейная чувствительность к нагрузке (Load Sensitivity) ---
+  // С ростом нагрузки удельное сцепление падает
+  const getMuDynamic = (Fz: number, Fz_ref: number, mu_base: number) => {
+    if (Fz <= 0) return 0;
+    // Эмпирическая формула: mu = mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref)
+    const k = 0.15; // Коэффициент чувствительности
+    return mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref);
+  };
+
+  const mu_VF = getMuDynamic(Fz_VF, Fz_static_front, muMax);
+  const mu_VN = getMuDynamic(Fz_VN, Fz_static_front, muMax);
+
+  const Fmax_VF = mu_VF * Fz_VF;
+  const Fmax_VN = mu_VN * Fz_VN;
+  
   const lateralLoadRatio = Math.max(0.1, a_y_g / Math.max(0.1, muMax));
   let Fy_VF = Fy_front_actual * (0.5 + 0.12 * lateralLoadRatio);
   let Fy_VN = Fy_front_actual * (0.5 - 0.12 * lateralLoadRatio);
@@ -393,12 +416,22 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   let Fx_max_VF = Fmax_VF > Fy_VF ? Math.sqrt(Fmax_VF ** 2 - Fy_VF ** 2) : 0;
   let Fx_max_VN = Fmax_VN > Fy_VN ? Math.sqrt(Fmax_VN ** 2 - Fy_VN ** 2) : 0;
 
-  const loadSensitivity_VF = Fz_VF > 0 ? Math.pow(Fz_VF / Fz_straight, 0.15) : 0;
-  const loadSensitivity_VN = Fz_VN > 0 ? Math.pow(Fz_VN / Fz_straight, 0.15) : 0;
   const mu_x_VF = Fz_VF > 0 ? Fx_max_VF / Fz_VF : 0;
   const mu_x_VN = Fz_VN > 0 ? Fx_max_VN / Fz_VN : 0;
-  const s_crit_VF = Math.max(2, CAR.s_opt * (mu_x_VF / muMax) * loadSensitivity_VF);
-  const s_crit_VN = Math.max(2, CAR.s_opt * (mu_x_VN / muMax) * loadSensitivity_VN);
+  
+  // --- ИСПРАВЛЕНИЕ 2: Инверсия логики критического скольжения s_crit ---
+  // С ростом боковой нагрузки (падением mu_x относительно mu_base) s_crit должен расти
+  const calculateScritCombined = (mu_x: number, mu_base: number, s_straight: number) => {
+    if (mu_base <= 0) return s_straight;
+    const combinedRatio = mu_x / mu_base;
+    // Если mu_x падает (сильный увод), s_crit растет: s_combined = s_straight / (mu_x/mu_base)
+    // Ограничиваем рост до 40% согласно Pacejka
+    return Math.min(40, s_straight / Math.max(0.5, combinedRatio));
+  };
+
+  const s_crit_VF = calculateScritCombined(mu_x_VF, muMax, CAR.s_opt);
+  const s_crit_VN = calculateScritCombined(mu_x_VN, muMax, CAR.s_opt);
+  
   const Fx_max_straight = muMax * Fz_straight;
   const Fx_front_required = CAR.m * deceleration * CAR.brakeDistFront;
   const Fx_req_per_wheel = Fx_front_required / 2;

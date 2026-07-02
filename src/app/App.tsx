@@ -419,18 +419,9 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const mu_x_VF = Fz_VF > 0 ? Fx_max_VF / Fz_VF : 0;
   const mu_x_VN = Fz_VN > 0 ? Fx_max_VN / Fz_VN : 0;
   
-  // --- ИСПРАВЛЕНИЕ 2: Инверсия логики критического скольжения s_crit ---
-  // С ростом боковой нагрузки (падением mu_x относительно mu_base) s_crit должен расти
-  const calculateScritCombined = (mu_x: number, mu_base: number, s_straight: number) => {
-    if (mu_base <= 0) return s_straight;
-    const combinedRatio = mu_x / mu_base;
-    // Если mu_x падает (сильный увод), s_crit растет: s_combined = s_straight / (mu_x/mu_base)
-    // Ограничиваем рост до 40% согласно Pacejka
-    return Math.min(40, s_straight / Math.max(0.5, combinedRatio));
-  };
-
-  const s_crit_VF = calculateScritCombined(mu_x_VF, muMax, CAR.s_opt);
-  const s_crit_VN = calculateScritCombined(mu_x_VN, muMax, CAR.s_opt);
+  // --- ИСПРАВЛЕНИЕ 4: возврат к негоночной модели сцепления с дорогой в повороте
+  const s_crit_VF = Math.max(2, CAR.s_opt * (mu_x_VF / muMax));
+  const s_crit_VN = Math.max(2, CAR.s_opt * (mu_x_VN / muMax));
   
   const Fx_max_straight = muMax * Fz_straight;
   const Fx_front_required = CAR.m * deceleration * CAR.brakeDistFront;

@@ -29,6 +29,7 @@ const EBD_CAR = {
   m: 1500,
   h: 0.5,
   L: 2.7,
+  g: 9.81,
   weightDistFront: 0.6,
   brakeDistFront: 0.65, // Фиксированное распределение сил без EBD
 };

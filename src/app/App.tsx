@@ -330,7 +330,7 @@ function AbsModule() {
               <div className="p-3 rounded-lg bg-amber-950/40 border-l-4 border-amber-500 border border-amber-500/20">
                 <h4 className="text-xs uppercase tracking-wider text-amber-400 font-bold">⚠️ Нарушение баланса (EBD)</h4>
                 <p className="text-[11px] text-amber-200 mt-1 leading-tight">
-                  Задняя ось разгружена ($f_2 > f_1$). В автомобиле без EBD это привело бы к <strong>опережающей блокировке задних колес</strong> и заносу.
+                  Задняя ось разгружена (f2 &gt; f1). В автомобиле без EBD это привело бы к <strong>опережающей блокировке задних колес</strong> и заносу.
                 </p>
               </div>
             )}
@@ -340,7 +340,7 @@ function AbsModule() {
               <div className="p-3 rounded-lg bg-rose-950/40 border-l-4 border-rose-500 border border-rose-500/20 animate-pulse">
                 <h4 className="text-xs uppercase tracking-wider text-rose-400 font-bold">🚨 Критический занос сзади</h4>
                 <p className="text-[11px] text-rose-200 mt-1 leading-tight">
-                  Предел сцепления задних колес ($f_2 > \mu$) превышен. Требуется немедленное вмешательство EBD/ABS для сброса давления.
+                  Предел сцепления задних колес (f2 &gt; μ) превышен. Требуется немедленное вмешательство EBD/ABS для сброса давления.
                 </p>
               </div>
             )}

@@ -18,11 +18,20 @@ import {
 type Tab = "abs" | "csc";
 
 // ============================================================
-// MODULE 1 — ABS / WHEEL LOCK (Table 7 StVZO)
+// MODULE 1 — ABS / WHEEL LOCK (Table 7 StVZO) + EBD LOGIC
 // ============================================================
 
 const VELOCITIES = Array.from({ length: 15 }, (_, i) => 20 + i * 10);
 const G = 9.81;
+
+// Константы для EBD (согласованные с модулем CSC)
+const EBD_CAR = {
+  m: 1500,
+  h: 0.5,
+  L: 2.7,
+  weightDistFront: 0.6,
+  brakeDistFront: 0.65, // Фиксированное распределение сил без EBD
+};
 
 const TABLE_COLUMNS: Record<
   number,
@@ -109,6 +118,20 @@ function AbsTooltip({ active, payload, label }: any) {
   );
 }
 
+function EbdTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl">
+      <p className="font-bold text-white mb-1">Замедление: {label} м/с²</p>
+      {payload.map((p: any) => (
+        <p key={p.name} style={{ color: p.color }}>
+          {p.name}: <span className="font-mono font-semibold">{Number(p.value).toFixed(3)}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function AbsModule() {
   const [decel, setDecel] = useState(6.0);
   const [baseMu, setBaseMu] = useState(0.65);
@@ -125,14 +148,32 @@ function AbsModule() {
     setMuInput(val.toFixed(2));
   }, []);
 
+  // --- ЛОГИКА EBD ДЛЯ ТЕКУЩЕГО ЗАМЕДЛЕНИЯ ---
+  const ebdStatus = useMemo(() => {
+    const { m, h, L, g, weightDistFront, brakeDistFront } = EBD_CAR;
+    const P1 = weightDistFront * m * g;
+    const P2 = (1 - weightDistFront) * m * g;
+    const dynamicTransfer = (m * decel * h) / L;
+    const N1 = P1 + dynamicTransfer;
+    const N2 = Math.max(0, P2 - dynamicTransfer);
+    const T1 = m * decel * brakeDistFront;
+    const T2 = m * decel * (1 - brakeDistFront);
+    const f1 = N1 > 0 ? T1 / N1 : 0;
+    const f2 = N2 > 0 ? T2 / N2 : 0;
+    const isRearLockingFirst = f2 > f1;
+    return { f1, f2, isRearLockingFirst, N2 };
+  }, [decel]);
+
   const rows = useMemo(() =>
     VELOCITIES.map((v) => {
       const muNew = calcMu(v, baseMu, false);
       const muWorn = calcMu(v, baseMu, true);
       const aNew = muNew * G;
       const aWorn = muWorn * G;
-      return { v, muNew, muWorn, aNew, aWorn, absNew: aNew < decel, absWorn: aWorn < decel };
-    }), [baseMu, decel]);
+      const isRearLockedNew = ebdStatus.f2 > muNew;
+      const isRearLockedWorn = ebdStatus.f2 > muWorn;
+      return { v, muNew, muWorn, aNew, aWorn, absNew: aNew < decel, absWorn: aWorn < decel, isRearLockedNew, isRearLockedWorn };
+    }), [baseMu, decel, ebdStatus.f2]);
 
   const chartData = useMemo(() =>
     rows.map((r) => ({
@@ -141,8 +182,30 @@ function AbsModule() {
       "Изношенные шины": +r.muWorn.toFixed(3),
     })), [rows]);
 
+  // --- ДАННЫЕ ДЛЯ ГРАФИКА EBD (f1, f2 vs замедление) ---
+  const ebdChartData = useMemo(() => {
+    const { m, h, L, g, weightDistFront, brakeDistFront } = EBD_CAR;
+    const P1 = weightDistFront * m * g;
+    const P2 = (1 - weightDistFront) * m * g;
+    return Array.from({ length: 19 }, (_, i) => 1.0 + i * 0.5).map((ax) => {
+      const dynamicTransfer = (m * ax * h) / L;
+      const N1 = P1 + dynamicTransfer;
+      const N2 = Math.max(0, P2 - dynamicTransfer);
+      const T1 = m * ax * brakeDistFront;
+      const T2 = m * ax * (1 - brakeDistFront);
+      const f1 = N1 > 0 ? T1 / N1 : 0;
+      const f2 = N2 > 0 ? T2 / N2 : 0;
+      return {
+        ax: ax.toFixed(1),
+        f1: +f1.toFixed(3),
+        f2: +f2.toFixed(3),
+      };
+    });
+  }, []);
+
   const firstAbsNew = rows.find((r) => r.absNew)?.v ?? null;
   const firstAbsWorn = rows.find((r) => r.absWorn)?.v ?? null;
+  const isRearLockedAny = rows.some(r => r.isRearLockedNew || r.isRearLockedWorn);
 
   return (
     <div className="space-y-8">
@@ -212,67 +275,123 @@ function AbsModule() {
         </div>
       </div>
 
-      {/* Chart + Summary */}
+      {/* EBD / Analysis Results */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-          <h3 className="text-base font-bold text-white mb-4">
-            Зависимость коэффициента сцепления μ(v) от скорости
-          </h3>
-          <div className="h-72">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-base font-bold text-white">
+              Анализ баланса тормозных сил (EBD Deficit)
+            </h3>
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider">Критерии ООН № 13-Н</span>
+          </div>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+              <LineChart data={ebdChartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="v" tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                <YAxis domain={[0, 1.15]} tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                <Tooltip content={<AbsTooltip />} />
+                <XAxis dataKey="ax" tick={{ fill: "#94a3b8", fontSize: 11 }} label={{ value: 'Замедление ax (м/с²)', position: 'insideBottom', offset: -5, fill: '#64748b', fontSize: 10 }} />
+                <YAxis domain={[0, 1.0]} tick={{ fill: "#94a3b8", fontSize: 11 }} label={{ value: 'Реализуемое сцепление f', angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 10 }} />
+                <Tooltip content={<EbdTooltip />} />
                 <Legend wrapperStyle={{ color: "#94a3b8", fontSize: 12 }} />
                 <ReferenceLine
-                  y={decel / G}
+                  x={decel.toFixed(1)}
                   stroke="#10b981"
                   strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                  label={{ value: `x/g = ${(decel / G).toFixed(2)}`, fill: "#10b981", fontSize: 10, position: "insideTopRight" }}
+                  strokeWidth={2}
+                  label={{ value: `Текущее: ${decel}`, fill: "#10b981", fontSize: 10, position: "insideTopRight" }}
                 />
-                <Line type="monotone" dataKey="Новые шины" stroke="#38bdf8" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                <Line type="monotone" dataKey="Изношенные шины" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="6 4" dot={false} activeDot={{ r: 4 }} />
+                <Line name="Передняя ось (f1)" type="monotone" dataKey="f1" stroke="#38bdf8" strokeWidth={2.5} dot={false} />
+                <Line name="Задняя ось (f2)" type="monotone" dataKey="f2" stroke="#f43f5e" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
+          <p className="mt-4 text-[11px] text-slate-500 leading-relaxed italic">
+            * Точка пересечения линий f1 и f2 показывает предел устойчивости ТС без системы EBD. Если красная линия (f2) выше синей (f1), задние колеса заблокируются раньше передних.
+          </p>
         </div>
 
-        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col justify-between">
-          <div>
-            <h3 className="text-base font-bold text-white mb-3">Результаты экспресс-анализа</h3>
-            <p className="text-sm text-slate-400 mb-4">
-              При замедлении <span className="text-white font-semibold">{decel.toFixed(1)} м/с²</span> и базовом сцеплении{" "}
-              <span className="text-sky-400 font-semibold">{baseMu.toFixed(2)}</span>:
-            </p>
-            <div className="space-y-4">
-              <div className={`p-3 rounded-lg bg-slate-900 border-l-4 ${firstAbsNew !== null ? "border-red-500" : "border-emerald-500"}`}>
-                <h4 className="text-xs uppercase tracking-wider text-slate-400 font-bold">Новые шины</h4>
-                <p className="text-sm text-slate-200 mt-1">
-                  {firstAbsNew !== null ? (
-                    <>Колеса заблокируются на скоростях <strong className="text-red-400">от {firstAbsNew} км/ч и выше</strong>. Потребуется активация ABS.</>
-                  ) : (
-                    <><strong className="text-emerald-400">ABS не сработает.</strong> Торможение стабильно во всём диапазоне скоростей.</>
-                  )}
+        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col gap-4">
+          <h3 className="text-base font-bold text-white">Результаты экспресс-анализа</h3>
+          
+          <div className="space-y-4">
+            {/* ABS Verdict */}
+            <div className={`p-3 rounded-lg bg-slate-900 border-l-4 ${firstAbsNew !== null ? "border-amber-500" : "border-emerald-500"}`}>
+              <h4 className="text-xs uppercase tracking-wider text-slate-400 font-bold">Статус ABS</h4>
+              <p className="text-sm text-slate-200 mt-1">
+                {firstAbsNew !== null ? (
+                  <>Риск блокировки передней оси на скоростях <strong className="text-amber-400">от {firstAbsNew} км/ч</strong>.</>
+                ) : (
+                  <><strong className="text-emerald-400">ABS стабильна.</strong> Передние колеса сохраняют качение.</>
+                )}
+              </p>
+            </div>
+
+            {/* EBD Balance Warning */}
+            {ebdStatus.isRearLockingFirst && (
+              <div className="p-3 rounded-lg bg-amber-950/40 border-l-4 border-amber-500 border border-amber-500/20">
+                <h4 className="text-xs uppercase tracking-wider text-amber-400 font-bold">⚠️ Нарушение баланса (EBD)</h4>
+                <p className="text-[11px] text-amber-200 mt-1 leading-tight">
+                  Задняя ось разгружена ($f_2 > f_1$). В автомобиле без EBD это привело бы к <strong>опережающей блокировке задних колес</strong> и заносу.
                 </p>
               </div>
-              <div className={`p-3 rounded-lg bg-slate-900 border-l-4 ${firstAbsWorn !== null ? "border-red-500" : "border-emerald-500"}`}>
-                <h4 className="text-xs uppercase tracking-wider text-slate-400 font-bold">Изношенные шины</h4>
-                <p className="text-sm text-slate-200 mt-1">
-                  {firstAbsWorn !== null ? (
-                    <>Срыв в юз на скорости <strong className="text-red-400">от {firstAbsWorn} км/ч и выше</strong>.</>
-                  ) : (
-                    <><strong className="text-emerald-400">ABS не сработает.</strong> Изношенный протектор справляется без срыва в юз.</>
-                  )}
+            )}
+
+            {/* Critical Rear Lock */}
+            {isRearLockedAny && (
+              <div className="p-3 rounded-lg bg-rose-950/40 border-l-4 border-rose-500 border border-rose-500/20 animate-pulse">
+                <h4 className="text-xs uppercase tracking-wider text-rose-400 font-bold">🚨 Критический занос сзади</h4>
+                <p className="text-[11px] text-rose-200 mt-1 leading-tight">
+                  Предел сцепления задних колес ($f_2 > \mu$) превышен. Требуется немедленное вмешательство EBD/ABS для сброса давления.
                 </p>
               </div>
+            )}
+
+            {!ebdStatus.isRearLockingFirst && !isRearLockedAny && (
+              <div className="p-3 rounded-lg bg-emerald-950/40 border-l-4 border-emerald-500 border border-emerald-500/20">
+                <h4 className="text-xs uppercase tracking-wider text-emerald-400 font-bold">✅ Баланс в норме</h4>
+                <p className="text-[11px] text-emerald-200 mt-1">
+                  Тормозные силы распределены безопасно. Передняя ось блокируется первой или одновременно.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-auto pt-4 border-t border-slate-700">
+            <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+              <span>Реализуемое сцепление спереди (f1):</span>
+              <span className="font-mono text-sky-400">{ebdStatus.f1.toFixed(3)}</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400">
+              <span>Реализуемое сцепление сзади (f2):</span>
+              <span className={`font-mono ${ebdStatus.isRearLockingFirst ? 'text-rose-400' : 'text-slate-300'}`}>{ebdStatus.f2.toFixed(3)}</span>
             </div>
           </div>
-          <p className="mt-4 text-[11px] text-slate-500 leading-relaxed">
-            <strong>* Примечание по обледенению (0.10):</strong> Для скоростей 90 и 130 км/ч используются значения из столбца мокрой дороги (0.50), где сцепление падает до критических отметок 0.05 и 0.00.
-          </p>
+        </div>
+      </div>
+
+      {/* Mu Chart */}
+      <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+        <h3 className="text-base font-bold text-white mb-4">
+          Зависимость коэффициента сцепления μ(v) от скорости
+        </h3>
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="v" tick={{ fill: "#94a3b8", fontSize: 11 }} />
+              <YAxis domain={[0, 1.15]} tick={{ fill: "#94a3b8", fontSize: 11 }} />
+              <Tooltip content={<AbsTooltip />} />
+              <Legend wrapperStyle={{ color: "#94a3b8", fontSize: 12 }} />
+              <ReferenceLine
+                y={decel / G}
+                stroke="#10b981"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{ value: `x/g = ${(decel / G).toFixed(2)}`, fill: "#10b981", fontSize: 10, position: "insideTopRight" }}
+              />
+              <Line type="monotone" dataKey="Новые шины" stroke="#38bdf8" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="Изношенные шины" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="6 4" dot={false} activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
@@ -372,8 +491,6 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const deltaFz_long = (CAR.m * deceleration * CAR.h) / (2 * CAR.L);
   const deltaFz_lat = (CAR.weightDistFront * CAR.m * a_y * CAR.h) / CAR.B;
 
-  // --- ИСПРАВЛЕНИЕ 1: Закон сохранения массы при отрыве колеса ---
-  // Максимальная нагрузка на ось ограничена статикой + продольным переносом
   const Fz_front_physical_max = 2 * (Fz_static_front + deltaFz_long);
   
   let Fz_VF = Fz_static_front + deltaFz_long + deltaFz_lat;
@@ -381,7 +498,7 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   
   if (Fz_VN < 0) {
     Fz_VN = 0;
-    Fz_VF = Fz_front_physical_max; // Внешнее колесо несет всю нагрузку оси
+    Fz_VF = Fz_front_physical_max;
   }
   if (Fz_VF < 0) Fz_VF = 0;
 
@@ -391,14 +508,11 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
   const Fy_front_max_possible = muMax * Fz_front_total;
   const Fy_front_actual = Math.min(Fy_front_total_req, Fy_front_max_possible);
   
-  // --- ИСПРАВЛЕНИЕ 3, 6: Нелинейная чувствительность к нагрузке (Load Sensitivity) ---
-  // С ростом нагрузки удельное сцепление падает, добавлено ограничение сверху - не выше базового сцепления
   const getMuDynamic = (Fz: number, Fz_ref: number, mu_base: number) => {
-  if (Fz <= 0) return 0;
-  const k = 0.15;
-  const mu = mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref);
-  return Math.min(mu_base, mu); // не выше базового
-};
+    if (Fz <= 0) return 0;
+    const k = 0.15; 
+    return mu_base * (1 - k * (Fz - Fz_ref) / Fz_ref);
+  };
 
   const mu_VF = getMuDynamic(Fz_VF, Fz_static_front, muMax);
   const mu_VN = getMuDynamic(Fz_VN, Fz_static_front, muMax);
@@ -418,19 +532,17 @@ function calculateDynamicState(speedKmh: number, deceleration: number, radius: n
 
   const mu_x_VF = Fz_VF > 0 ? Fx_max_VF / Fz_VF : 0;
   const mu_x_VN = Fz_VN > 0 ? Fx_max_VN / Fz_VN : 0;
+  
+  const calculateScritCombined = (mu_x: number, mu_base: number, s_straight: number) => {
+    if (mu_base <= 0) return s_straight;
+    const combinedRatio = mu_x / mu_base;
+    return Math.min(40, s_straight / Math.max(0.5, combinedRatio));
+  };
 
+  const s_crit_VF = calculateScritCombined(mu_x_VF, muMax, CAR.s_opt);
+  const s_crit_VN = calculateScritCombined(mu_x_VN, muMax, CAR.s_opt);
+  
   const Fx_max_straight = muMax * Fz_straight;
-  
-  // --- ИСПРАВЛЕНИЕ 4: возврат к негоночной модели сцепления с дорогой в повороте
-  // const s_crit_VF = Math.max(2, CAR.s_opt * (mu_x_VF / muMax));
-  // const s_crit_VN = Math.max(2, CAR.s_opt * (mu_x_VN / muMax));
-  
-  // ИСПРАВЛЕНИЕ 7: добавлена защита деления на 0
-  const s_crit_VF = Math.max(2, CAR.s_opt * (Fx_max_VF / Math.max(1, Fx_max_straight)));
-  const s_crit_VN = Math.max(2, CAR.s_opt * (Fx_max_VN / Math.max(1, Fx_max_straight)));
- 
-  // const Fx_max_straight = muMax * Fz_straight;
-  
   const Fx_front_required = CAR.m * deceleration * CAR.brakeDistFront;
   const Fx_req_per_wheel = Fx_front_required / 2;
 
@@ -559,30 +671,26 @@ function CscModule() {
           </div>
         </div>
 
-<div className={`rounded-2xl p-5 border shadow-lg transition-all duration-300 ${calc.isLocked_VF ? "bg-rose-950/80 border-rose-500 text-rose-100" : "bg-slate-800/90 border-slate-700 text-slate-100"}`}>
-  <div className="flex justify-between items-center">
-    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Внешнее колесо (VF)</h3>
-    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${calc.isLocked_VF ? "bg-rose-500 text-white animate-pulse" : "bg-emerald-500/10 text-emerald-400"}`}>
-      {calc.isLocked_VF ? "🚨 БЛОКИРОВКА!" : "✅ СТАБИЛЬНО"}
-    </span>
-  </div>
-  <div className="mt-4 space-y-2 text-xs">
-    <div className="flex justify-between">
-      <span className="text-slate-400">Порог скольжения (s_crit):</span>
-      <span className="font-mono font-bold text-emerald-400">{calc.s_crit_VF.toFixed(1)}%</span>
-    </div>
-    <div className="flex justify-between">
-      <span className="text-slate-400">Скольжение без CSC (s_act):</span>
-      <span className={`font-mono font-bold ${calc.isLocked_VF ? "text-rose-400" : "text-slate-300"}`}>
-        {calc.s_actual_VF.toFixed(1)}% {calc.isLocked_VF && "(Глубокий Срыв)"}
-      </span>
-    </div>
-    <div className="border-t border-slate-700/50 pt-2 flex justify-between text-[10px] text-slate-500">
-      <span>Запрос тормозов: {calc.Fx_req_per_wheel.toFixed(0)} Н</span>
-      <span>Предел сцепления: {calc.Fx_max_VF.toFixed(0)} Н</span>
-    </div>
-  </div>
-</div>
+        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg">
+          <div className="flex justify-between items-center">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Внешнее колесо (VF)</h3>
+            <span className="bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full text-xs font-bold">✅ СТАБИЛЬНО</span>
+          </div>
+          <div className="mt-4 space-y-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Порог скольжения (s_crit):</span>
+              <span className="font-mono font-bold text-emerald-400">{calc.s_crit_VF.toFixed(1)}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Скольжение без CSC (s_act):</span>
+              <span className="font-mono font-bold text-slate-300">{calc.s_actual_VF.toFixed(1)}%</span>
+            </div>
+            <div className="border-t border-slate-700/50 pt-2 flex justify-between text-[10px] text-slate-500">
+              <span>Запрос тормозов: {calc.Fx_req_per_wheel.toFixed(0)} Н</span>
+              <span>Предел сцепления: {calc.Fx_max_VF.toFixed(0)} Н</span>
+            </div>
+          </div>
+        </div>
 
         <div className={`rounded-2xl p-5 border shadow-lg transition-all duration-300 ${calc.cscBrakeReductionRequired ? "bg-blue-950/80 border-blue-500 text-blue-100" : "bg-slate-800/90 border-slate-700 text-slate-100"}`}>
           <div className="flex justify-between items-center">
